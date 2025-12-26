@@ -4,7 +4,9 @@ A base64 encoder/decoder in Zig.
 
 ## Background
 
-The original version came from a Zig programming book and used an OOP-style approach (struct with `init()` and methods). I refactored it to be more idiomatic Zig:
+The original version came from a Zig programming book and used an OOP-style approach (struct with `init()` and methods). I've kept that version in `oop.zig`.
+
+I refactored it to be more idiomatic Zig:
 
 - Module-level constants instead of struct fields
 - Comptime-generated lookup table for O(1) decoding
