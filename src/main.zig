@@ -4,7 +4,7 @@ const BASE64_TABLE = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012345
 const ASCII_TABLE = build_ascii_table();
 
 fn build_ascii_table() [256]u8 {
-    comptime var table: [256]u8 = undefined;
+    comptime var table: [256]u8 = .{255} ** 256;
     inline for (BASE64_TABLE, 0..) |char, i| {
         table[char] = @intCast(i);
     }
@@ -88,6 +88,9 @@ pub fn decode(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     if (input.len == 0) {
         return allocator.alloc(u8, 0);
     }
+    if (input.len % 4 != 0) {
+        return error.InvalidLength;
+    }
     const n_output = try calc_decode_length(input);
     var output = try allocator.alloc(u8, n_output);
     var count: u8 = 0;
@@ -95,7 +98,12 @@ pub fn decode(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     var buf = [4]u8{ 0, 0, 0, 0 };
 
     for (0..input.len) |i| {
-        buf[count] = ASCII_TABLE[input[i]];
+        const char_index = ASCII_TABLE[input[i]];
+        if (char_index == 255) {
+            allocator.free(output);
+            return error.InvalidCharacter;
+        }
+        buf[count] = char_index;
         count += 1;
         if (count == 4) {
             output[iout] = (buf[0] << 2) + (buf[1] >> 4);
@@ -139,7 +147,7 @@ pub fn main() !void {
     // Get input from args or stdin
     const input_from_stdin = args.len < 3;
     const input = if (args.len >= 3) args[2] else blk: {
-        var stdin_buffer: [1024]u8 = undefined;
+        var stdin_buffer: [1024 * 1024]u8 = undefined;
         var stdin_reader = std.fs.File.stdin().reader(io, &stdin_buffer);
         const stdin = &stdin_reader.interface;
         const line = try stdin.takeDelimiterExclusive('\n');
@@ -224,4 +232,16 @@ test "roundtrip preserves data" {
     defer allocator.free(decoded);
 
     try std.testing.expectEqualStrings(original, decoded);
+}
+
+test "decode rejects invalid length" {
+    const allocator = std.testing.allocator;
+    const result = decode(allocator, "ABC");
+    try std.testing.expectError(error.InvalidLength, result);
+}
+
+test "decode rejects invalid characters" {
+    const allocator = std.testing.allocator;
+    const result = decode(allocator, "!!!!");
+    try std.testing.expectError(error.InvalidCharacter, result);
 }
