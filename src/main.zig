@@ -114,7 +114,8 @@ pub fn decode(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
 }
 
 pub fn main() !void {
-    const io = std.testing.io;
+    var threaded: std.Io.Threaded = .init_single_threaded;
+    const io = threaded.io();
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
