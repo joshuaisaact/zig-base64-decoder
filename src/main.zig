@@ -1,7 +1,19 @@
 const std = @import("std");
-const zig_base64 = @import("zig_base64");
 
-const TABLE = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const BASE64_TABLE = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const ASCII_TABLE = build_ascii_table();
+
+fn build_ascii_table() [256]u8 {
+    comptime var table: [256]u8 = undefined;
+    inline for (BASE64_TABLE, 0..) |char, i| {
+        table[char] = @intCast(i);
+    }
+
+    // Handle the null value
+    table['='] = 64;
+
+    return table;
+}
 
 fn calc_encode_length(input: []const u8) !usize {
     if (input.len < 3) {
@@ -11,9 +23,9 @@ fn calc_encode_length(input: []const u8) !usize {
     return n_groups * 4;
 }
 
-fn encode(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
+pub fn encode(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     if (input.len == 0) {
-        return "";
+        return allocator.alloc(u8, 0);
     }
 
     const n_out = try calc_encode_length(input);
@@ -27,26 +39,26 @@ fn encode(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
         count += 1;
 
         if (count == 3) {
-            out[iout] = TABLE[(buf[0] >> 2)];
-            out[iout + 1] = TABLE[((buf[0] & 0x03) << 4) + (buf[1] >> 4)];
-            out[iout + 2] = TABLE[((buf[1] & 0x0f) << 2) + (buf[2] >> 6)];
-            out[iout + 3] = TABLE[buf[2] & 0x3f];
+            out[iout] = BASE64_TABLE[(buf[0] >> 2)];
+            out[iout + 1] = BASE64_TABLE[((buf[0] & 0x03) << 4) + (buf[1] >> 4)];
+            out[iout + 2] = BASE64_TABLE[((buf[1] & 0x0f) << 2) + (buf[2] >> 6)];
+            out[iout + 3] = BASE64_TABLE[buf[2] & 0x3f];
             iout += 4;
             count = 0;
         }
     }
 
     if (count == 1) {
-        out[iout] = TABLE[buf[0] >> 2];
-        out[iout + 1] = TABLE[(buf[0] & 0x03) << 4];
+        out[iout] = BASE64_TABLE[buf[0] >> 2];
+        out[iout + 1] = BASE64_TABLE[(buf[0] & 0x03) << 4];
         out[iout + 2] = '=';
         out[iout + 3] = '=';
     }
 
     if (count == 2) {
-        out[iout] = TABLE[buf[0] >> 2];
-        out[iout + 1] = TABLE[((buf[0] & 0x03) << 4) + (buf[1] >> 4)];
-        out[iout + 2] = TABLE[(buf[1] & 0x0f) << 2];
+        out[iout] = BASE64_TABLE[buf[0] >> 2];
+        out[iout + 1] = BASE64_TABLE[((buf[0] & 0x03) << 4) + (buf[1] >> 4)];
+        out[iout + 2] = BASE64_TABLE[(buf[1] & 0x0f) << 2];
         out[iout + 3] = '=';
     }
 
@@ -72,18 +84,18 @@ fn calc_decode_length(input: []const u8) !usize {
     return multiple_groups;
 }
 
-fn decode(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
+pub fn decode(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     if (input.len == 0) {
-        return "";
+        return allocator.alloc(u8, 0);
     }
-    const n_output = try _calc_decode_length(input);
+    const n_output = try calc_decode_length(input);
     var output = try allocator.alloc(u8, n_output);
     var count: u8 = 0;
     var iout: u64 = 0;
     var buf = [4]u8{ 0, 0, 0, 0 };
 
     for (0..input.len) |i| {
-        buf[count] = self._char_index(input[i]);
+        buf[count] = ASCII_TABLE[input[i]];
         count += 1;
         if (count == 4) {
             output[iout] = (buf[0] << 2) + (buf[1] >> 4);
@@ -101,68 +113,96 @@ fn decode(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     return output;
 }
 
-// fn char_index(self: Base64, char: u8) u8 {
-//     if (char == '=') {
-//         return 64;
-//     }
-
-//     var i: u8 = 0;
-//     var output_index: u8 = 0;
-
-//     while (i < 64) : (i += 1) {
-//         if (self._char_at(i) == char) {
-//             break;
-//         }
-//         output_index += 1;
-//     }
-
-//     return output_index;
-// }
-//
-const print = std.debug.print;
+const posix = std.posix;
 
 pub fn main() !void {
-    print("Type of TABLE: {}\n", .{@TypeOf(TABLE)});
-    // var stdout_buffer: [1024]u8 = undefined;
-    // var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
-    // const stdout = &stdout_writer.interface;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
 
-    // var memory_buffer: [1000]u8 = undefined;
-    // var fba = std.heap.FixedBufferAllocator.init(&memory_buffer);
-    // const allocator = fba.allocator();
+    if (args.len < 3) {
+        std.debug.print("Usage: zig-base64 <encode|decode> <text>\n", .{});
+        return;
+    }
 
-    // const text = "Testing some more stuff";
-    // const etext = "VGVzdGluZyBzb21lIG1vcmUgc3R1ZmY=";
+    const command = args[1];
+    const input = args[2];
 
-    // const base64 = Base64.init();
-    // const encoded_text = try base64.encode(allocator, text);
-    // const decoded_text = try base64.decode(allocator, etext);
-
-    // try stdout.print("Encoded text: {s}\n", .{encoded_text});
-    // try stdout.print("Decoded text: {s}\n", .{decoded_text});
-
-    // try stdout.flush();
-
-    // Prints to stderr, ignoring potential errors.
-    // std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
-    // try zig_base64.bufferedPrint();
+    if (std.mem.eql(u8, command, "encode")) {
+        const result = try encode(allocator, input);
+        defer allocator.free(result);
+        _ = try posix.write(posix.STDOUT_FILENO, result);
+        _ = try posix.write(posix.STDOUT_FILENO, "\n");
+    } else if (std.mem.eql(u8, command, "decode")) {
+        const result = try decode(allocator, input);
+        defer allocator.free(result);
+        _ = try posix.write(posix.STDOUT_FILENO, result);
+        _ = try posix.write(posix.STDOUT_FILENO, "\n");
+    } else {
+        std.debug.print("Unknown command. Use 'encode' or 'decode'.\n", .{});
+    }
 }
 
-test "simple test" {
-    const gpa = std.testing.allocator;
-    var list: std.ArrayList(i32) = .empty;
-    defer list.deinit(gpa); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(gpa, 42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
+test "encode and decode" {
+    const text = "Testing some more stuff";
+    const etext = "VGVzdGluZyBzb21lIG1vcmUgc3R1ZmY=";
+    const allocator = std.testing.allocator;
+
+    const encoded_text = try encode(allocator, text);
+    defer allocator.free(encoded_text);
+
+    const decoded_text = try decode(allocator, etext);
+    defer allocator.free(decoded_text);
+
+    try std.testing.expectEqualStrings(etext, encoded_text);
+    try std.testing.expectEqualStrings(text, decoded_text);
 }
 
-test "fuzz example" {
-    const Context = struct {
-        fn testOne(context: @This(), input: []const u8) anyerror!void {
-            _ = context;
-            // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
-            try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input));
-        }
-    };
-    try std.testing.fuzz(Context{}, Context.testOne, .{});
+test "gracefully handles an empty string" {
+    const allocator = std.testing.allocator;
+
+    const encoded_text = try encode(allocator, "");
+    defer allocator.free(encoded_text);
+
+    const decoded_text = try decode(allocator, "");
+    defer allocator.free(decoded_text);
+
+    try std.testing.expectEqual(@as(usize, 0), encoded_text.len);
+    try std.testing.expectEqual(@as(usize, 0), decoded_text.len);
+}
+
+test "single byte encodes with double padding" {
+    const allocator = std.testing.allocator;
+    const result = try encode(allocator, "A");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("QQ==", result);
+}
+
+test "two bytes encode with single padding" {
+    const allocator = std.testing.allocator;
+    const result = try encode(allocator, "AB");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("QUI=", result);
+}
+
+test "three bytes encode with no padding" {
+    const allocator = std.testing.allocator;
+    const result = try encode(allocator, "ABC");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("QUJD", result);
+}
+
+test "roundtrip preserves data" {
+    const allocator = std.testing.allocator;
+    const original = "Hello, World!";
+
+    const encoded = try encode(allocator, original);
+    defer allocator.free(encoded);
+
+    const decoded = try decode(allocator, encoded);
+    defer allocator.free(decoded);
+
+    try std.testing.expectEqualStrings(original, decoded);
 }
