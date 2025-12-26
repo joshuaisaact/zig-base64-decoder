@@ -113,33 +113,51 @@ pub fn decode(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     return output;
 }
 
-const posix = std.posix;
-
 pub fn main() !void {
+    const io = std.testing.io;
+
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
+
+    var stdout_buffer: [1024]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+    const stdout = &stdout_writer.interface;
+
+    // Args
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
-    if (args.len < 3) {
-        std.debug.print("Usage: zig-base64 <encode|decode> <text>\n", .{});
+    if (args.len < 2) {
+        std.debug.print("Usage: zig-base64 <encode|decode> [text]\n", .{});
         return;
     }
 
     const command = args[1];
-    const input = args[2];
+
+    // Get input from args or stdin
+    const input_from_stdin = args.len < 3;
+    const input = if (args.len >= 3) args[2] else blk: {
+        var stdin_buffer: [1024]u8 = undefined;
+        var stdin_reader = std.fs.File.stdin().reader(io, &stdin_buffer);
+        const stdin = &stdin_reader.interface;
+        const line = try stdin.takeDelimiterExclusive('\n');
+        break :blk line;
+    };
+    _ = input_from_stdin;
 
     if (std.mem.eql(u8, command, "encode")) {
         const result = try encode(allocator, input);
         defer allocator.free(result);
-        _ = try posix.write(posix.STDOUT_FILENO, result);
-        _ = try posix.write(posix.STDOUT_FILENO, "\n");
+        try stdout.writeAll(result);
+        try stdout.writeAll("\n");
+        try stdout.flush();
     } else if (std.mem.eql(u8, command, "decode")) {
         const result = try decode(allocator, input);
         defer allocator.free(result);
-        _ = try posix.write(posix.STDOUT_FILENO, result);
-        _ = try posix.write(posix.STDOUT_FILENO, "\n");
+        try stdout.writeAll(result);
+        try stdout.writeAll("\n");
+        try stdout.flush();
     } else {
         std.debug.print("Unknown command. Use 'encode' or 'decode'.\n", .{});
     }
