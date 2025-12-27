@@ -29,7 +29,21 @@ zig build run -- decode "SGVsbG8sIFdvcmxkIQ=="
 # Pipe from stdin
 echo "Hello" | zig build run -- encode
 # Output: SGVsbG8=
+
+# Encode a file
+cat image.png | zig build run -- encode > image.b64
+
+# Decode a file
+cat image.b64 | zig build run -- decode > image_restored.png
+
+# Roundtrip
+echo "Hello" | zig build run -- encode | zig build run -- decode
+# Output: Hello
 ```
+
+## Limits
+
+Maximum input size via stdin is 10MB.
 
 ## Tests
 
