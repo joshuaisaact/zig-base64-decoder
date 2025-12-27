@@ -1,7 +1,10 @@
 const std = @import("std");
+const math = std.math;
+const mem = std.mem;
 
 const BASE64_TABLE = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 const ASCII_TABLE = build_ascii_table();
+const DecodeError = error{ InvalidLength, InvalidCharacter, OutOfMemory };
 
 fn build_ascii_table() [256]u8 {
     comptime var table: [256]u8 = .{255} ** 256;
@@ -15,27 +18,37 @@ fn build_ascii_table() [256]u8 {
     return table;
 }
 
-fn calc_encode_length(input: []const u8) !usize {
+fn calc_encode_length(input: []const u8) usize {
     if (input.len < 3) {
         return 4;
     }
-    const n_groups: usize = try std.math.divCeil(usize, input.len, 3);
-    return n_groups * 4;
+    return (math.divCeil(usize, input.len, 3) catch unreachable) * 4;
 }
 
-pub fn encode(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
+fn calc_decode_length(input: []const u8) !usize {
+    if (input.len < 3) return 3;
+
+    const n_groups = input.len / 4;
+    var result = n_groups * 3;
+    if (input[input.len - 1] == '=') result -= 1;
+    if (input[input.len - 2] == '=') result -= 1;
+
+    return result;
+}
+
+pub fn encode(allocator: mem.Allocator, input: []const u8) ![]u8 {
     if (input.len == 0) {
         return allocator.alloc(u8, 0);
     }
 
-    const n_out = try calc_encode_length(input);
+    const n_out = calc_encode_length(input);
     var out = try allocator.alloc(u8, n_out);
     var buf = [3]u8{ 0, 0, 0 };
     var count: u8 = 0;
     var iout: u64 = 0;
 
-    for (input, 0..) |_, i| {
-        buf[count] = input[i];
+    for (input) |byte| {
+        buf[count] = byte;
         count += 1;
 
         if (count == 3) {
@@ -65,34 +78,16 @@ pub fn encode(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     return out;
 }
 
-fn calc_decode_length(input: []const u8) !usize {
-    if (input.len < 3) {
-        return 3;
-    }
-
-    const n_groups: usize = try std.math.divFloor(usize, input.len, 4);
-    var multiple_groups = n_groups * 3;
-    var i: usize = input.len - 1;
-    while (i > 0) : (i -= 1) {
-        if (input[i] == '=') {
-            multiple_groups -= 1;
-        } else {
-            break;
-        }
-    }
-
-    return multiple_groups;
-}
-
-pub fn decode(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
+pub fn decode(allocator: mem.Allocator, input: []const u8) DecodeError![]u8 {
     if (input.len == 0) {
         return allocator.alloc(u8, 0);
     }
     if (input.len % 4 != 0) {
-        return error.InvalidLength;
+        return DecodeError.InvalidLength;
     }
     const n_output = try calc_decode_length(input);
     var output = try allocator.alloc(u8, n_output);
+    errdefer allocator.free(output);
     var count: u8 = 0;
     var iout: u64 = 0;
     var buf = [4]u8{ 0, 0, 0, 0 };
@@ -100,8 +95,7 @@ pub fn decode(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     for (0..input.len) |i| {
         const char_index = ASCII_TABLE[input[i]];
         if (char_index == 255) {
-            allocator.free(output);
-            return error.InvalidCharacter;
+            return DecodeError.InvalidCharacter;
         }
         buf[count] = char_index;
         count += 1;
@@ -144,8 +138,6 @@ pub fn main() !void {
 
     const command = args[1];
 
-    // Get input from args or stdin
-    const input_from_stdin = args.len < 3;
     const input = if (args.len >= 3) args[2] else blk: {
         var stdin_buffer: [1024 * 1024]u8 = undefined;
         var stdin_reader = std.fs.File.stdin().reader(io, &stdin_buffer);
@@ -153,15 +145,14 @@ pub fn main() !void {
         const line = try stdin.takeDelimiterExclusive('\n');
         break :blk line;
     };
-    _ = input_from_stdin;
 
-    if (std.mem.eql(u8, command, "encode")) {
+    if (mem.eql(u8, command, "encode")) {
         const result = try encode(allocator, input);
         defer allocator.free(result);
         try stdout.writeAll(result);
         try stdout.writeAll("\n");
         try stdout.flush();
-    } else if (std.mem.eql(u8, command, "decode")) {
+    } else if (mem.eql(u8, command, "decode")) {
         const result = try decode(allocator, input);
         defer allocator.free(result);
         try stdout.writeAll(result);
