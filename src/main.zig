@@ -4,6 +4,8 @@ const mem = std.mem;
 
 const BASE64_TABLE = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 const ASCII_TABLE = build_ascii_table();
+const MAX_INPUT_SIZE = 10 * 1024 * 1024; // 10MB
+const STDIN_BUFFER_SIZE = 256 * 1024; // 256KB
 const DecodeError = error{ InvalidLength, InvalidCharacter, OutOfMemory };
 
 fn build_ascii_table() [256]u8 {
@@ -12,7 +14,7 @@ fn build_ascii_table() [256]u8 {
         table[char] = @intCast(i);
     }
 
-    // Handle the null value
+    // Handle the padding character
     table['='] = 64;
 
     return table;
@@ -25,7 +27,7 @@ fn calc_encode_length(input: []const u8) usize {
     return (math.divCeil(usize, input.len, 3) catch unreachable) * 4;
 }
 
-fn calc_decode_length(input: []const u8) !usize {
+fn calc_decode_length(input: []const u8) usize {
     if (input.len < 3) return 3;
 
     const n_groups = input.len / 4;
@@ -85,7 +87,7 @@ pub fn decode(allocator: mem.Allocator, input: []const u8) DecodeError![]u8 {
     if (input.len % 4 != 0) {
         return DecodeError.InvalidLength;
     }
-    const n_output = try calc_decode_length(input);
+    const n_output = calc_decode_length(input);
     var output = try allocator.alloc(u8, n_output);
     errdefer allocator.free(output);
     var count: u8 = 0;
@@ -138,13 +140,15 @@ pub fn main() !void {
 
     const command = args[1];
 
+    const stdin_allocated = args.len < 3;
     const input = if (args.len >= 3) args[2] else blk: {
-        var stdin_buffer: [1024 * 1024]u8 = undefined;
+        var stdin_buffer: [STDIN_BUFFER_SIZE]u8 = undefined;
         var stdin_reader = std.fs.File.stdin().reader(io, &stdin_buffer);
         const stdin = &stdin_reader.interface;
-        const line = try stdin.takeDelimiterExclusive('\n');
-        break :blk line;
+        const stdin_input = try stdin.allocRemaining(allocator, @enumFromInt(MAX_INPUT_SIZE));
+        break :blk stdin_input;
     };
+    defer if (stdin_allocated) allocator.free(input);
 
     if (mem.eql(u8, command, "encode")) {
         const result = try encode(allocator, input);
